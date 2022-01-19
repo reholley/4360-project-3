@@ -1,0 +1,248 @@
+---
+title: "STAT 4360 Project 2"
+output: pdf_document
+---
+Mini Project #2
+Name: Rachel Holley
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+#loading in packages
+library(tidyverse)
+library(ggplot2)
+library(purrr)
+library(ggpubr)
+library(corrplot)
+library(Hmisc)
+library(MASS)
+library(vioplot)
+library(car)
+library(caret)
+library(pROC)
+library(boot)
+library(klaR)
+```
+
+## Problem 1
+# (a)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# loading in data
+diabetes <- read.table(file = "diabetes.csv", header = TRUE, sep = ",", dec = ".")
+
+# exploratory analysis with correlation matrix and metrics
+diabetes.cor = cor(diabetes, method = c("spearman"))
+diabetes.rcorr = rcorr(as.matrix(diabetes))
+diabetes.rcorr
+corrplot(diabetes.cor)
+
+glimpse(diabetes)
+unique(diabetes)
+
+# changing outcome to a factor
+diabetes$Outcome <- as.factor(diabetes$Outcome)
+```
+
+# (b)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# splitting data into test and train
+samp_size <- floor(0.8 * nrow(diabetes))
+
+## set the seed to make your partition reproducible
+set.seed(123)
+i <- sample(seq_len(nrow(diabetes)), size = samp_size)
+
+train <- diabetes[i, ]
+test <- diabetes[-i, ]
+
+# seeing significant variables
+baseFit <- glm(Outcome~., data = diabetes, family = binomial)
+summary(baseFit)
+
+# model with chosen significant variables
+fit_1 <- glm(Outcome ~ Pregnancies.. + Glucose.. + BloodPressure.. + BMI..
+              + DiabetesPedigreeFunction.., data = diabetes, family = binomial)
+summary(fit_1)
+
+# final variable selection
+final_fit <- glm(Outcome ~ Pregnancies.. + Glucose.. + BloodPressure.. + BMI..
+              + DiabetesPedigreeFunction.. + Age.. + Insulin.., data = diabetes, family = binomial)
+summary(final_fit)
+```
+
+# (c)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+summary(final_fit)
+confint(final_fit)
+
+prob_1c <- predict(final_fit, diabetes, type = "response")
+pred_1c <- ifelse(prob_1c >= 0.5, "1", "0")
+err_1c <- 1 - mean(pred_1c == diabetes[, "Outcome"])
+
+cat("The training error rate: ", err_1c)
+```
+
+## Problem 2
+# (a)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+fit_2 <- glm(Outcome ~., data = diabetes, family = binomial)
+
+# Estimated probabilities for test data
+train_prob_2a <- predict(fit_2, train, type = "response")
+test_prob_2a <- predict(fit_2, test, type = "response")
+
+# Predicted classes (using 0.5 cutoff)
+train_pred_2a <- ifelse(train_prob_2a >= 0.5, "1", "0")
+test_pred_2a <- ifelse(test_prob_2a >= 0.5, "1", "0")
+
+# train error rate and confusion matrix
+train_err_2a <- 1 - mean(train_pred_2a == train[, "Outcome"])
+train_confmat_2a <- table(train_pred_2a, train[, "Outcome"])
+
+# test error rate and confusion matrix
+test_err_2a <- 1 - mean(test_pred_2a == test[, "Outcome"])
+test_confmat_2a <- table(test_pred_2a, test[, "Outcome"])
+
+cat("The training error rate is: ", train_err_2a, "\n")
+cat("The training sensitivity is: ", sensitivity(train_confmat_2a), "\n")
+cat("The training speficity is: ", specificity(train_confmat_2a), "\n \n")
+
+cat("The testing error rate is: ", test_err_2a, "\n")
+cat("The testing sensitivity is: ", sensitivity(test_confmat_2a), "\n")
+cat("The testing speficity is: ", specificity(test_confmat_2a), "\n")
+```
+
+# (b)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# loocv method that we crafted
+loocv <- function(fit, x, y)
+{
+  pred_y <- predict(fit, x, type = "response")
+  pred_y <- ifelse(pred_y >= 0.5, "1", "0")
+  diffin_y <- as.numeric(y != pred_y)
+  H <- influence(fit)$hat
+  h <- (1-H)^2
+  CV_n <- mean(diffin_y/h)
+  
+  return(CV_n)
+}
+
+cat("The accuracy is: ", 1 - loocv(fit_2, test[, 1:8], test[, "Outcome"]))
+```
+# (b)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+accuracy <- 0
+for(i in 1:2000)
+{
+    model <- glm(Outcome ~., data = diabetes[-i,], family = binomial)
+    val <- predict(model, diabetes[i,], type = 'response')
+    val <- ifelse(val >= 0.5, 1, 0)
+    temp <- as.numeric(diabetes[i,length(diabetes)] != val)
+    accuracy[i] <- temp
+}
+cat("The error is: ", mean(accuracy), "\n")
+cat("The accuracy is: ", 1 - mean(accuracy))
+```
+
+# (c)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# specifying training method
+train_control <- trainControl(method="LOOCV")
+# train the model
+model_2 <- train(as.factor(Outcome)~., data=diabetes, trControl=train_control, method="glm")
+# summarize results
+cat("The model error is: ", 1 - model_2$results[1,2], "\n")
+cat("The model accuracy is: ", model_2$results[1,2])
+```
+
+# (d)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+train_control_2 <- trainControl(method="LOOCV")
+# train the model
+model_1 <- train(as.factor(Outcome) ~ Pregnancies.. + Glucose.. + BloodPressure.. + BMI..
+              + DiabetesPedigreeFunction.. + Age.. + Insulin.., data=diabetes, trControl=train_control_2, method="glm")
+# summarize results
+cat("The model accuracyuracy is: ", 1-model_1$results[1,2])
+```
+
+# (e)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+lda_2e <- train(as.factor(Outcome) ~ Pregnancies.. + Glucose.. + BloodPressure.. + BMI..
+              + DiabetesPedigreeFunction.. + Age.. + Insulin.., data=test, trControl=train_control_2, method="lda")
+# summarize results
+cat("The model accuracyuracy is: ", 1 - lda_2e$results[1,2])
+```
+
+# (f)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+qda_2f <- train(as.factor(Outcome) ~ Pregnancies.. + Glucose.. + BloodPressure.. + BMI..
+              + DiabetesPedigreeFunction.. + Age.. + Insulin.., data=diabetes, trControl=train_control_2, method="qda")
+# summarize results
+cat("The model accuracy is: ", 1 - qda_2f$results[1,2])
+```
+
+# (g)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+## BEST CLASSIFIER BECAUSE accuracyURACY IS WAAAAAAAAAAAY HIGHER
+# train the model
+knn_2g <- train(as.factor(Outcome)~., data=diabetes, method = "knn", trControl = train_control_2, preProcess = c("center","scale"), tuneGrid = expand.grid(k = 1:5))
+
+print(knn_2g)
+cat("The model error is: ", 1 - 0.9985)
+```
+
+## Problem 3
+# (a)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+oxy <- read.delim(file = "oxygen_saturation.txt", header = TRUE, sep = "\t")
+
+# scatterplot with 45 degree line
+plot(oxy)
+abline(0,1)
+
+# boxplot of differences in the absolute values
+oxy$difference <- abs(oxy$osm - oxy$pos)
+ggplot(oxy, aes(difference)) + geom_boxplot()
+```
+
+# (c)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# point estimate
+set.seed(123)
+quantile(oxy$difference, 0.9)
+```
+
+# (d)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# bootstrap method that we crafted
+set.seed(123)
+n <- 1000
+samp <- vector(mode = "numeric", length = n)
+
+for(i in 1:n) 
+{
+  samp[i] <- quantile(sample(oxy$difference, length(oxy$difference), replace = TRUE), 0.9)
+}
+
+mean(samp)
+quantile(samp, 0.95)
+```
+
+# (e)
+```{r, fig.show = 'hide', results = 'hide', message = FALSE, warning = FALSE}
+# normal bootstrap function to test data
+set.seed(123)
+func <- function(x, indices) 
+{
+	result <- quantile((x[indices]), 0.9)
+	return(result)
+}
+
+boot <- boot(oxy$difference, func, R = 1000)
+boot$t0
+boot.ci(boot, type = "perc", conf = 0.9)
+boot
+```
